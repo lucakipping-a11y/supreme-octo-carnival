@@ -2,46 +2,81 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>ESP32 CSV Logger</title>
     <style>
-        body { font-family: -apple-system, sans-serif; padding: 20px; text-align: center; }
-        button { font-size: 18px; padding: 15px; margin: 10px; width: 100%; max-width: 300px; border-radius: 10px; border: none; cursor: pointer; }
+        body { 
+            font-family: -apple-system, Helvetica, Arial, sans-serif; 
+            padding: 20px; 
+            text-align: center; 
+            background-color: #f4f4f4;
+        }
+        h1 { font-size: 24px; margin-bottom: 10px; }
+        p { color: #666; margin-bottom: 20px; }
+        
+        button { 
+            font-size: 18px; 
+            padding: 15px; 
+            margin: 10px 0; 
+            width: 100%; 
+            max-width: 350px; 
+            border-radius: 12px; 
+            border: none; 
+            cursor: pointer; 
+            font-weight: bold;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
         .btn-con { background-color: #007AFF; color: white; }
         .btn-save { background-color: #34C759; color: white; }
-        .btn-stop { background-color: #FF3B30; color: white; }
-        #log { height: 300px; overflow-y: scroll; background: #f0f0f0; border: 1px solid #ccc; margin-top: 20px; padding: 10px; text-align: left; font-family: monospace; }
+        .btn-save:disabled { background-color: #ccc; cursor: not-allowed; }
+        
+        #log { 
+            height: 300px; 
+            overflow-y: scroll; 
+            background: white; 
+            border: 1px solid #ddd; 
+            border-radius: 8px;
+            margin-top: 20px; 
+            padding: 10px; 
+            text-align: left; 
+            font-family: monospace; 
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
 
-    <h1>ESP32 Data Logger</h1>
-    <p id="status">Nicht verbunden</p>
+    <h1>ESP32 Daten-Logger</h1>
+    <p id="status">Bereit zur Verbindung...</p>
 
-    <button onclick="connectBLE()" class="btn-con">Verbinden</button>
-    <button onclick="downloadCSV()" class="btn-save" id="saveBtn" disabled>Als CSV speichern</button>
+    <button onclick="connectBLE()" class="btn-con">1. Mit ESP32 Verbinden</button>
+    <button onclick="exportData()" class="btn-save" id="saveBtn" disabled>2. Daten speichern / teilen</button>
 
-    <div id="log">Warte auf Daten...<br></div>
+    <div id="log">Warte auf Verbindung...<br></div>
 
     <script>
-        // Die UUIDs müssen mit dem ESP32 übereinstimmen (Nordic UART)
+        // WICHTIG: UUIDs müssen klein geschrieben sein für JavaScript!
+        // Das sind die Standard Nordic UART Service UUIDs
         const serviceUuid = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
         const characteristicUuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
 
         let device, server, service, characteristic;
-        let csvContent = "data:text/csv;charset=utf-8,Zeit(ms),Wert\n"; // CSV Header
+        // CSV Header: Wir starten mit Spaltennamen
+        let csvContent = "Uhrzeit,Messwert\n"; 
 
         async function connectBLE() {
             try {
-                document.getElementById('status').innerText = "Suche Gerät...";
+                document.getElementById('status').innerText = "Suche Bluetooth Geräte...";
                 
-               device = await navigator.bluetooth.requestDevice({
-    			// Wir akzeptieren JEDES Gerät, um zu testen, ob es überhaupt gefunden wird
-    		acceptAllDevices: true,
-    		optionalServices: [serviceUuid]
-		});
+                // Wir akzeptieren alle Geräte, um Filter-Probleme zu vermeiden
+                device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: [serviceUuid]
+                });
 
-                document.getElementById('status').innerText = "Verbinde...";
+                document.getElementById('status').innerText = "Verbinde mit " + device.name + "...";
+                
                 server = await device.gatt.connect();
                 service = await server.getPrimaryService(serviceUuid);
                 characteristic = await service.getCharacteristic(characteristicUuid);
@@ -50,64 +85,95 @@
                 characteristic.addEventListener('characteristicvaluechanged', handleData);
 
                 document.getElementById('status').innerText = "Verbunden! Empfange Daten...";
+                document.getElementById('status').style.color = "green";
                 document.getElementById('saveBtn').disabled = false;
                 
             } catch (error) {
                 console.error(error);
                 document.getElementById('status').innerText = "Fehler: " + error;
+                alert("Verbindungsfehler: " + error);
             }
         }
 
         function handleData(event) {
             const value = new TextDecoder().decode(event.target.value);
             
-            // Daten zum CSV String hinzufügen
-            // Wir entfernen Zeilenumbrüche, da wir sie sauber formatieren wollen
+            // Entferne Leerzeichen/Umbrüche aus dem Rohwert
             let cleanValue = value.replace(/(\r\n|\n|\r)/gm, "");
             
             if(cleanValue.length > 0) {
-                csvContent += cleanValue + "\n";
+                // Aktuelle iPhone Uhrzeit holen (z.B. 14:30:05)
+                let now = new Date();
+                let timeString = now.toLocaleTimeString();
+
+                // Zeile für CSV bauen: "14:30:05, 25"
+                let csvLine = timeString + "," + cleanValue + "\n";
+                csvContent += csvLine;
                 
-                // Anzeige im Log-Fenster
+                // Im Log anzeigen (scrollt automatisch nach unten)
                 const logDiv = document.getElementById('log');
-                logDiv.innerHTML += cleanValue + "<br>";
-                logDiv.scrollTop = logDiv.scrollHeight; // Auto-Scroll nach unten
+                logDiv.innerHTML += `<b>${timeString}:</b> ${cleanValue}<br>`;
+                logDiv.scrollTop = logDiv.scrollHeight; 
             }
         }
 
-       function downloadCSV() {
-    // Sicherheits-Check: Haben wir Daten?
-    if (csvContent.length < 50) {
-        alert("Noch zu wenig Daten zum Speichern!");
-        return;
-    }
+        async function exportData() {
+            if (!csvContent || csvContent.length < 20) {
+                alert("Noch keine Daten empfangen!");
+                return;
+            }
 
-    try {
-        // 1. Wir erstellen ein echtes Datei-Objekt (Blob) im Speicher
-        // Das ist sauberer als der alte Weg
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        
-        // 2. Wir erstellen eine temporäre URL für diesen Blob
-        const url = URL.createObjectURL(blob);
-        
-        // 3. Wir bauen einen unsichtbaren Link und klicken ihn
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", "messwerte.csv");
-        
-        // WICHTIG für iOS: Der Link muss kurz Teil der Seite sein
-        document.body.appendChild(link);
-        
-        link.click(); // Klick simulieren
-        
-        // Aufräumen
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        
-    } catch (e) {
-        alert("Fehler beim Speichern: " + e);
-    }
-}
+            try {
+                // Methode 1: Native iOS "Teilen" Funktion (Share Sheet)
+                const file = new File([csvContent], "messwerte.csv", { type: "text/csv" });
+
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        files: [file],
+                        title: 'ESP32 Messwerte',
+                        text: 'Hier sind die CSV Daten vom ESP32.'
+                    });
+                    return; // Wenn das geklappt hat, sind wir fertig
+                } 
+            } catch (error) {
+                console.log("Teilen nicht unterstützt, nutze Fallback...", error);
+            }
+
+            // Methode 2: Fallback (Textfeld zum Kopieren)
+            showCopyFallback();
+        }
+
+        function showCopyFallback() {
+            alert("Das direkte Speichern hat nicht geklappt. Die Daten werden jetzt angezeigt. Bitte 'Alles auswählen' und 'Kopieren' wählen.");
+            
+            // Erstelle ein Vollbild-Textfeld
+            const overlay = document.createElement("div");
+            overlay.style.position = "fixed";
+            overlay.style.top = "0"; left = "0"; width = "100%"; height = "100%";
+            overlay.style.backgroundColor = "white";
+            overlay.style.zIndex = "9999";
+            overlay.style.display = "flex";
+            overlay.style.flexDirection = "column";
+
+            const textArea = document.createElement("textarea");
+            textArea.value = csvContent;
+            textArea.style.flex = "1";
+            textArea.style.fontSize = "14px";
+            textArea.style.padding = "10px";
+
+            const closeBtn = document.createElement("button");
+            closeBtn.innerText = "FERTIG / SCHLIESSEN";
+            closeBtn.style.padding = "20px";
+            closeBtn.style.backgroundColor = "#FF3B30";
+            closeBtn.style.color = "white";
+            closeBtn.onclick = function() { document.body.removeChild(overlay); };
+
+            overlay.appendChild(textArea);
+            overlay.appendChild(closeBtn);
+            document.body.appendChild(overlay);
+            
+            textArea.select(); // Versuch, alles automatisch zu markieren
+        }
     </script>
 </body>
 </html>
