@@ -35,10 +35,11 @@
             try {
                 document.getElementById('status').innerText = "Suche Gerät...";
                 
-                device = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'ESP32 CSV Logger' }],
-                    optionalServices: [serviceUuid]
-                });
+               device = await navigator.bluetooth.requestDevice({
+    			// Wir akzeptieren JEDES Gerät, um zu testen, ob es überhaupt gefunden wird
+    		acceptAllDevices: true,
+    		optionalServices: [serviceUuid]
+		});
 
                 document.getElementById('status').innerText = "Verbinde...";
                 server = await device.gatt.connect();
