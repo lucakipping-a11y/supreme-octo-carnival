@@ -3,74 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>ESP32 Simple Logger</title>
+    <title>ESP32 Realtime Plotter</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <style>
         body { 
             font-family: -apple-system, sans-serif; 
-            padding: 15px; 
+            padding: 10px; 
             text-align: center; 
-            background-color: #eee;
+            background-color: #f8f9fa;
         }
         
+        /* Container für das Diagramm */
+        .chart-container {
+            position: relative; 
+            height: 300px; 
+            width: 100%;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            padding: 5px;
+            box-sizing: border-box;
+        }
+
         button { 
             font-size: 18px; 
-            padding: 15px; 
-            margin: 10px 0; 
+            padding: 12px; 
+            margin: 5px 0; 
             width: 100%; 
-            border-radius: 10px; 
+            border-radius: 8px; 
             border: none; 
             font-weight: bold;
+            color: white;
         }
         
-        .btn-blue { background-color: #007AFF; color: white; }
-        .btn-red { background-color: #FF3B30; color: white; }
-        
-        /* Das Textfeld, wo die CSV Daten landen */
+        .btn-connect { background-color: #007AFF; }
+        .btn-copy { background-color: #34C759; }
+
+        /* Kleines Log-Fenster für Text-Daten */
         #csvBox {
             width: 100%;
-            height: 300px;
+            height: 100px;
             font-family: monospace;
-            font-size: 12px;
+            font-size: 11px;
             border: 1px solid #ccc;
-            padding: 10px;
-            box-sizing: border-box;
-            background-color: white;
-            white-space: pre; /* Wichtig für Zeilenumbrüche */
-            overflow: scroll;
+            margin-top: 10px;
         }
-        
-        label { display: block; margin-top: 20px; font-weight: bold; text-align: left;}
     </style>
 </head>
 <body>
 
-    <h2>ESP32 CSV Logger</h2>
-    <p id="status" style="color:gray">Nicht verbunden</p>
+    <h3>ESP32 Live Plotter</h3>
+    <p id="status" style="color:gray; font-size: 14px;">Nicht verbunden</p>
 
-    <button onclick="connectBLE()" class="btn-blue">1. ESP32 Verbinden</button>
+    <div class="chart-container">
+        <canvas id="myChart"></canvas>
+    </div>
 
-    <label for="csvBox">Deine Daten (Live):</label>
-    <textarea id="csvBox" readonly>Uhrzeit,Messwert&#13;&#10;</textarea>
-
-    <button onclick="copyData()" class="btn-red">2. Alles Kopieren</button>
+    <button onclick="connectBLE()" class="btn-connect">Verbinden</button>
+    
+    <textarea id="csvBox" readonly>Uhrzeit,Wert&#13;&#10;</textarea>
+    <button onclick="copyData()" class="btn-copy">Daten Kopieren</button>
 
     <script>
+        // --- KONFIGURATION ---
         const serviceUuid = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
         const characteristicUuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+        const maxDataPoints = 50; // Wieviele Punkte sollen gleichzeitig sichtbar sein?
 
+        // --- CHART SETUP ---
+        const ctx = document.getElementById('myChart').getContext('2d');
+        const myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [], // Hier kommen die Uhrzeiten rein
+                datasets: [{
+                    label: 'Messwert',
+                    data: [], // Hier kommen die Zahlen rein
+                    borderColor: '#007AFF',
+                    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 2,
+                    fill: true,
+                    tension: 0.3 // Macht die Linie etwas kurvig/weich
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 }, // Animation aus für Performance
+                scales: {
+                    x: { display: true, ticks: { maxTicksLimit: 5 } },
+                    y: { beginAtZero: true } // Oder false, wenn du auch negative Werte hast
+                }
+            }
+        });
+
+        // --- BLE LOGIC ---
         let device, server, service, characteristic;
 
         async function connectBLE() {
             try {
                 document.getElementById('status').innerText = "Suche...";
-                
                 device = await navigator.bluetooth.requestDevice({
                     acceptAllDevices: true,
                     optionalServices: [serviceUuid]
                 });
 
                 document.getElementById('status').innerText = "Verbinde...";
-                
                 server = await device.gatt.connect();
                 service = await server.getPrimaryService(serviceUuid);
                 characteristic = await service.getCharacteristic(characteristicUuid);
@@ -78,50 +120,64 @@
                 await characteristic.startNotifications();
                 characteristic.addEventListener('characteristicvaluechanged', handleData);
 
-                document.getElementById('status').innerText = "Verbunden! Empfange Daten...";
+                document.getElementById('status').innerText = "Verbunden! Plotting läuft...";
                 document.getElementById('status').style.color = "green";
-                
             } catch (error) {
                 document.getElementById('status').innerText = "Fehler: " + error;
             }
         }
 
         function handleData(event) {
-            const value = new TextDecoder().decode(event.target.value);
-            let cleanValue = value.replace(/(\r\n|\n|\r)/gm, "");
+            const valueStr = new TextDecoder().decode(event.target.value);
+            // Bereinigen (Leerzeichen weg)
+            let cleanValue = valueStr.replace(/(\r\n|\n|\r)/gm, "");
             
-            if(cleanValue.length > 0) {
+            // WICHTIG: Versuchen, den Text in eine echte Zahl umzuwandeln
+            let floatValue = parseFloat(cleanValue);
+
+            if (!isNaN(floatValue)) {
+                // Zeitstempel holen
                 let now = new Date();
                 let timeString = now.toLocaleTimeString();
 
-                // Datenzeile bauen
+                // 1. CHART UPDATE
+                addDataToChart(timeString, floatValue);
+
+                // 2. CSV UPDATE (Textfeld)
                 let csvLine = timeString + "," + cleanValue + "\n";
-                
-                // Direkt in das Textfeld schreiben
                 const box = document.getElementById('csvBox');
                 box.value += csvLine;
-                
-                // Automatisch nach unten scrollen
                 box.scrollTop = box.scrollHeight; 
             }
         }
 
+        function addDataToChart(label, data) {
+            // Daten hinzufügen
+            myChart.data.labels.push(label);
+            myChart.data.datasets.forEach((dataset) => {
+                dataset.data.push(data);
+            });
+
+            // Wenn zu viele Punkte da sind, den ältesten löschen (Moving Window)
+            if (myChart.data.labels.length > maxDataPoints) {
+                myChart.data.labels.shift();
+                myChart.data.datasets.forEach((dataset) => {
+                    dataset.data.shift();
+                });
+            }
+
+            myChart.update();
+        }
+
         function copyData() {
             const box = document.getElementById('csvBox');
-            
-            // 1. Textfeld auswählen
             box.select();
-            box.setSelectionRange(0, 99999); // Für mobile Geräte
-
-            // 2. Kopier-Befehl ausführen
-            try {
-                document.execCommand("copy");
-                alert("Daten kopiert! Öffne jetzt 'Numbers' oder 'Notizen' und füge sie ein.");
-            } catch (err) {
-                alert("Kopieren fehlgeschlagen. Bitte halte den Finger lange auf das Textfeld und wähle 'Alles auswählen' -> 'Kopieren'.");
-            }
+            box.setSelectionRange(0, 99999);
+            document.execCommand("copy");
+            alert("CSV Daten kopiert!");
         }
     </script>
 </body>
 </html>
+
 
