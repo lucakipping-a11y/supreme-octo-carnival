@@ -75,15 +75,39 @@
             }
         }
 
-        function downloadCSV() {
-            const encodedUri = encodeURI(csvContent);
-            const link = document.createElement("a");
-            link.setAttribute("href", encodedUri);
-            link.setAttribute("download", "esp32_daten.csv");
-            document.body.appendChild(link);
-            link.click(); // Startet den Download auf dem iPhone
-            document.body.removeChild(link);
-        }
+       function downloadCSV() {
+    // Sicherheits-Check: Haben wir Daten?
+    if (csvContent.length < 50) {
+        alert("Noch zu wenig Daten zum Speichern!");
+        return;
+    }
+
+    try {
+        // 1. Wir erstellen ein echtes Datei-Objekt (Blob) im Speicher
+        // Das ist sauberer als der alte Weg
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        
+        // 2. Wir erstellen eine temporäre URL für diesen Blob
+        const url = URL.createObjectURL(blob);
+        
+        // 3. Wir bauen einen unsichtbaren Link und klicken ihn
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", "messwerte.csv");
+        
+        // WICHTIG für iOS: Der Link muss kurz Teil der Seite sein
+        document.body.appendChild(link);
+        
+        link.click(); // Klick simulieren
+        
+        // Aufräumen
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+    } catch (e) {
+        alert("Fehler beim Speichern: " + e);
+    }
+}
     </script>
 </body>
 </html>
