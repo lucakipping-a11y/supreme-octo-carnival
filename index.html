@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 CSV Logger</title>
+    <style>
+        body { font-family: -apple-system, sans-serif; padding: 20px; text-align: center; }
+        button { font-size: 18px; padding: 15px; margin: 10px; width: 100%; max-width: 300px; border-radius: 10px; border: none; cursor: pointer; }
+        .btn-con { background-color: #007AFF; color: white; }
+        .btn-save { background-color: #34C759; color: white; }
+        .btn-stop { background-color: #FF3B30; color: white; }
+        #log { height: 300px; overflow-y: scroll; background: #f0f0f0; border: 1px solid #ccc; margin-top: 20px; padding: 10px; text-align: left; font-family: monospace; }
+    </style>
+</head>
+<body>
+
+    <h1>ESP32 Data Logger</h1>
+    <p id="status">Nicht verbunden</p>
+
+    <button onclick="connectBLE()" class="btn-con">Verbinden</button>
+    <button onclick="downloadCSV()" class="btn-save" id="saveBtn" disabled>Als CSV speichern</button>
+
+    <div id="log">Warte auf Daten...<br></div>
+
+    <script>
+        // Die UUIDs müssen mit dem ESP32 übereinstimmen (Nordic UART)
+        const serviceUuid = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+        const characteristicUuid = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+
+        let device, server, service, characteristic;
+        let csvContent = "data:text/csv;charset=utf-8,Zeit(ms),Wert\n"; // CSV Header
+
+        async function connectBLE() {
+            try {
+                document.getElementById('status').innerText = "Suche Gerät...";
+                
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ name: 'ESP32 CSV Logger' }],
+                    optionalServices: [serviceUuid]
+                });
+
+                document.getElementById('status').innerText = "Verbinde...";
+                server = await device.gatt.connect();
+                service = await server.getPrimaryService(serviceUuid);
+                characteristic = await service.getCharacteristic(characteristicUuid);
+
+                await characteristic.startNotifications();
+                characteristic.addEventListener('characteristicvaluechanged', handleData);
+
+                document.getElementById('status').innerText = "Verbunden! Empfange Daten...";
+                document.getElementById('saveBtn').disabled = false;
+                
+            } catch (error) {
+                console.error(error);
+                document.getElementById('status').innerText = "Fehler: " + error;
+            }
+        }
+
+        function handleData(event) {
+            const value = new TextDecoder().decode(event.target.value);
+            
+            // Daten zum CSV String hinzufügen
+            // Wir entfernen Zeilenumbrüche, da wir sie sauber formatieren wollen
+            let cleanValue = value.replace(/(\r\n|\n|\r)/gm, "");
+            
+            if(cleanValue.length > 0) {
+                csvContent += cleanValue + "\n";
+                
+                // Anzeige im Log-Fenster
+                const logDiv = document.getElementById('log');
+                logDiv.innerHTML += cleanValue + "<br>";
+                logDiv.scrollTop = logDiv.scrollHeight; // Auto-Scroll nach unten
+            }
+        }
+
+        function downloadCSV() {
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "esp32_daten.csv");
+            document.body.appendChild(link);
+            link.click(); // Startet den Download auf dem iPhone
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
